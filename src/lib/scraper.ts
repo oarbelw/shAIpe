@@ -4,30 +4,31 @@ import { scrapedProductSchema, type ScrapedProduct } from "@/lib/validators";
 /**
  * Product page scraper.
  *
- * Strategy:
+ * Strategy (each tier only runs if the previous one didn't produce a good result):
  *   1. Static fetch + cheerio (fast path for open sites)
- *   2. Detect bot/challenge pages (Cloudflare, Akamai) and discard them
- *   3. Playwright headless browser for JS-heavy / bot-protected retailers
- *      (Aritzia, Zara, many fashion sites)
- *   4. JSON-LD, Open Graph, __NEXT_DATA__, and embedded product JSON
+ *   2. Reader proxy (r.jina.ai) — renders JS and fetches through its own IP
+ *      pool, so it gets past datacenter-IP bot blocks (Akamai/Cloudflare) that
+ *      defeat a cloud-hosted browser. This is what makes Aritzia/Zara/etc. work
+ *      in production on Railway.
+ *   3. Playwright headless browser — final fallback for JS-heavy sites that the
+ *      proxy can't read (works locally; from a datacenter IP it's often blocked).
+ *   4. Extraction: JSON-LD, Open Graph, __NEXT_DATA__, embedded product JSON.
  *
- * Some retailers (e.g. Levi's via Akamai) block all automated access from
- * certain networks — those will still fail and the UI falls back to manual
- * product image upload.
+ * Only when all tiers fail does the UI fall back to manual product image upload.
  */
 
 export async function scrapeProduct(url: string): Promise<ScrapedProduct> {
   const html = await fetchStatic(url);
   let result = html && !isBlockedPage(html) ? extractFromHtml(html, url) : null;
 
+  // Tier 2: reader proxy — the workhorse for bot-protected retailers.
   if (!result || isLowQuality(result)) {
-    const rendered = await fetchWithPlaywright(url);
-    if (rendered && !isBlockedPage(rendered)) {
-      const renderedResult = extractFromHtml(rendered, url);
-      if (renderedResult && (!result || qualityScore(renderedResult) > qualityScore(result))) {
-        result = renderedResult;
-      }
-    }
+    result = mergeBetter(result, await scrapeVia(fetchViaReaderProxy, url));
+  }
+
+  // Tier 3: local headless browser — last resort.
+  if (!result || isLowQuality(result)) {
+    result = mergeBetter(result, await scrapeVia(fetchWithPlaywright, url));
   }
 
   if (!result || isBlockedTitle(result.title)) {
@@ -37,6 +38,26 @@ export async function scrapeProduct(url: string): Promise<ScrapedProduct> {
   }
 
   return scrapedProductSchema.parse(result);
+}
+
+/** Run a fetcher, extract, and return a result only if it parses to a real product. */
+async function scrapeVia(
+  fetcher: (url: string) => Promise<string | null>,
+  url: string
+): Promise<ScrapedProduct | null> {
+  const html = await fetcher(url);
+  if (!html || isBlockedPage(html)) return null;
+  return extractFromHtml(html, url);
+}
+
+/** Keep whichever result scores higher (the new one wins ties so later tiers can improve). */
+function mergeBetter(
+  current: ScrapedProduct | null,
+  candidate: ScrapedProduct | null
+): ScrapedProduct | null {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return qualityScore(candidate) >= qualityScore(current) ? candidate : current;
 }
 
 export class ScrapeError extends Error {
@@ -74,6 +95,42 @@ async function fetchStatic(url: string): Promise<string | null> {
     if (!res.ok) return null;
     return await res.text();
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a fully-rendered page through the Jina AI reader proxy.
+ *
+ * The proxy renders JavaScript and requests from its own (often residential)
+ * IP pool, so it gets past the datacenter-IP bot blocks that stop a browser
+ * running on Railway/Render/Fly. We ask for HTML back (not markdown) so the
+ * existing JSON-LD / Open Graph / <img> extractors keep working unchanged.
+ *
+ * Keyless usage is rate-limited; set JINA_API_KEY for higher limits.
+ */
+async function fetchViaReaderProxy(url: string): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = {
+      "X-Return-Format": "html",
+      // Tell the proxy to wait for the main product content to render.
+      "X-Timeout": "30",
+    };
+    if (process.env.JINA_API_KEY) {
+      headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+    }
+
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      headers,
+      signal: AbortSignal.timeout(35000),
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    return html.length > 200 ? html : null;
+  } catch (error) {
+    console.error("Reader proxy fetch failed:", error);
     return null;
   }
 }
