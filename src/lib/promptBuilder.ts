@@ -47,13 +47,19 @@ export function buildTryOnPrompt(ctx: TryOnPromptContext): string {
       ? `\nColor hints from product page: ${scrapedColors.join(", ")}`
       : "";
 
-  return `Generate a realistic ${ctx.view}-view try-on image of the user wearing the EXACT clothing item shown in the attached product reference photo(s).
+  return `Generate a realistic ${ctx.view}-view try-on image of the user wearing the EXACT clothing item shown in the attached product reference photo.
 
 CRITICAL — PRODUCT FIDELITY (highest priority):
-- The attached product reference image(s) are the single source of truth for this garment's appearance.
-- Reproduce the EXACT colors, shades, logos, printed text, graphics, trim, piping, and construction details from the product photo.
-- Do NOT guess or invent colors based on the brand name, store name, or product title. Example: a brand like "Strawberry Milk Mob" or printed word "STRAWBERRY" does NOT mean pink or red unless the product photo shows pink/red fabric.
-- The generated garment must be visually identical to the reference product — same color, same graphics, same silhouette.
+- The attached product reference photo is the ONLY source of truth for this garment's appearance.
+- Reproduce the EXACT fabric color, printed graphics, logos, and construction visible in that photo.
+- Do NOT guess colors from brand or product names (e.g. "Strawberry" does NOT mean pink).
+- The garment on the user must look like the same item as in the product photo.
+
+CRITICAL — DO NOT PRINT MARKETING TEXT ON THE GARMENT:
+- NEVER render product descriptions, website copy, bullet points, feature lists, or care instructions on the clothing.
+- NEVER print text like "These shorts have lining", inseam measurements, pocket descriptions, or brand mission statements on the fabric.
+- ONLY reproduce text/graphics that are physically printed ON THE GARMENT in the product reference photo (e.g. a logo or brand wordmark on the fabric).
+- Marketing metadata below is for context only — it must NOT appear as text on the clothing.
 ${visualSpecBlock}
 
 Use the user's uploaded reference photos to preserve:
@@ -64,12 +70,11 @@ Use the user's uploaded reference photos to preserve:
 - Height and proportions
 - General posture
 
-Clothing item metadata (secondary to the product photo):
+Minimal product metadata (do not print this on the garment):
 - Brand: ${product.brand ?? "unknown"}
 - Product name: ${product.title}
 - Category: ${product.category ?? "unknown"}
 - Material: ${product.material ?? "unknown"}
-- Fit description: ${product.fitDescription ?? "unknown"}
 - Selected size: ${ctx.selectedSize ?? "not specified"}
 - Color: ${colorLine}
 

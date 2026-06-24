@@ -15,6 +15,9 @@ export type ProductVisualSpec = {
 const COLOR_WORDS =
   /\b(black|white|off[- ]white|cream|ivory|grey|gray|charcoal|silver|red|maroon|burgundy|pink|blush|rose|orange|yellow|gold|green|teal|emerald|olive|lime|mint|blue|navy|cobalt|sky|purple|violet|lavender|brown|tan|beige|khaki|camel|denim|indigo|multicolor|multi-color)\b/gi;
 
+const MARKETING_COPY_RE =
+  /\b(lining|inseam|pocket|shipping|checkout|hand-wash|machine wash|for the first time|let us know|summer style|retailer|add to cart|true to size|washing instructions|return policy)\b/i;
+
 /**
  * Pull explicit color mentions from scraped product copy, e.g.
  * "Green with STRAWBERRY logo on front" on Strawberry Milk Mob.
@@ -42,14 +45,56 @@ export function extractColorHintsFromProduct(product: Product): string[] {
   return [...hints];
 }
 
+/** Extract short garment-graphic hints from bullet lines, not marketing paragraphs. */
+export function extractGarmentGraphicHint(product: Product): string | null {
+  const sources = [product.description, product.rawScrapedText].filter(Boolean) as string[];
+
+  for (const source of sources) {
+    const bulletMatch = source.match(
+      /\b(black|white|grey|gray|red|pink|orange|yellow|green|teal|emerald|olive|blue|navy|purple|brown|tan|beige|khaki)\s+with\s+["']?([^"'\n.]{1,40})["']?\s+(?:logo|text|print|on front|on back)/i
+    );
+    if (bulletMatch) {
+      return `${bulletMatch[1]} with "${bulletMatch[2].trim()}" on the garment`;
+    }
+  }
+
+  return null;
+}
+
+export function looksLikeMarketingCopy(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (trimmed.length > 120) return true;
+  if (MARKETING_COPY_RE.test(trimmed)) return true;
+  if (trimmed.split(/\s+/).length > 18) return true;
+  return false;
+}
+
+export function sanitizeVisualSpec(spec: ProductVisualSpec): ProductVisualSpec {
+  return {
+    ...spec,
+    logosAndGraphics:
+      spec.logosAndGraphics && !looksLikeMarketingCopy(spec.logosAndGraphics)
+        ? spec.logosAndGraphics
+        : undefined,
+    keyDetails: spec.keyDetails?.filter((detail) => !looksLikeMarketingCopy(detail)),
+    reproductionNotes:
+      spec.reproductionNotes && !looksLikeMarketingCopy(spec.reproductionNotes)
+        ? spec.reproductionNotes
+        : "Copy only graphics printed on the fabric in the product photo. Never print website descriptions or feature lists on the garment.",
+  };
+}
+
 export function formatVisualSpecForPrompt(spec: ProductVisualSpec): string {
   const lines = [
     `- Primary color: ${spec.primaryColor}`,
     spec.accentColors?.length ? `- Accent colors: ${spec.accentColors.join(", ")}` : null,
-    spec.logosAndGraphics ? `- Logos/graphics/text: ${spec.logosAndGraphics}` : null,
+    spec.logosAndGraphics ? `- Graphics printed ON the garment: ${spec.logosAndGraphics}` : null,
     spec.patternAndTexture ? `- Pattern/texture: ${spec.patternAndTexture}` : null,
-    spec.keyDetails?.length ? `- Key construction details: ${spec.keyDetails.join("; ")}` : null,
-    spec.reproductionNotes ? `- Reproduction notes: ${spec.reproductionNotes}` : null,
+    spec.keyDetails?.length
+      ? `- Visible construction details: ${spec.keyDetails.join("; ")}`
+      : null,
+    spec.reproductionNotes ? `- Notes: ${spec.reproductionNotes}` : null,
   ].filter(Boolean);
 
   return lines.join("\n");
@@ -57,14 +102,15 @@ export function formatVisualSpecForPrompt(spec: ProductVisualSpec): string {
 
 function fallbackVisualSpec(product: Product): ProductVisualSpec | null {
   const hints = extractColorHintsFromProduct(product);
-  if (hints.length === 0 && !product.description) return null;
+  const graphicHint = extractGarmentGraphicHint(product);
+  if (hints.length === 0 && !graphicHint) return null;
 
-  return {
+  return sanitizeVisualSpec({
     primaryColor: hints[0] ?? "match the product reference image exactly",
-    logosAndGraphics: product.description?.slice(0, 300),
+    logosAndGraphics: graphicHint ?? undefined,
     reproductionNotes:
-      "Match the attached product reference image exactly. Do not infer colors from the brand or product name.",
-  };
+      "Match the product reference photo exactly. Do not print marketing copy or product descriptions on the garment.",
+  });
 }
 
 async function loadImageForAnalysis(url?: string | null): Promise<{
@@ -94,8 +140,8 @@ async function loadImageForAnalysis(url?: string | null): Promise<{
 }
 
 /**
- * Uses Gemini vision to extract exact visual details from the product photo so
- * generation copies color/logos from the image — not from brand-name associations.
+ * Uses Gemini vision to extract exact visual details from the product photo.
+ * Deliberately ignores product descriptions — image pixels only.
  */
 export async function analyzeProductVisual(
   product: Product,
@@ -111,8 +157,10 @@ export async function analyzeProductVisual(
   const textHints = extractColorHintsFromProduct(product);
   const hintLine =
     textHints.length > 0
-      ? `Scraped color hints from the product page (may supplement the image): ${textHints.join(", ")}`
-      : "No scraped color hints.";
+      ? `Color hints from product page (colors only, not text to print): ${textHints.join(", ")}`
+      : "No color hints.";
+
+  const graphicHint = extractGarmentGraphicHint(product);
 
   try {
     const response = await client.models.generateContent({
@@ -122,18 +170,27 @@ export async function analyzeProductVisual(
           role: "user",
           parts: [
             {
-              text: `You are analyzing a clothing product photo for a virtual try-on system.
-Describe ONLY what you see in the image — exact colors, logos, printed text, graphics, trim, fabric texture, and distinctive details.
+              text: `Analyze this clothing product PHOTO for virtual try-on reproduction.
 
-Product metadata (may be misleading — trust the image over names):
+Describe ONLY what is physically visible ON THE GARMENT in the image:
+- Fabric color(s)
+- Logos, brand marks, or printed text that are physically printed/embroidered on the fabric
+- Trim, piping, drawstrings, pockets visible in the photo
+- Pattern and texture
+
+Product context (for identification only — do NOT copy website/marketing text onto the garment):
 - Title: ${product.title}
 - Brand: ${product.brand ?? "unknown"}
-- Description: ${product.description?.slice(0, 800) ?? "none"}
 - ${hintLine}
+${graphicHint ? `- Garment graphic hint from product specs: ${graphicHint}` : ""}
 
-CRITICAL: Do NOT infer color from brand or product names. Example: brand "Strawberry Milk Mob" or text "STRAWBERRY" does NOT mean pink/red unless the garment in the photo is actually pink/red.
+CRITICAL RULES:
+- Do NOT include product descriptions, marketing copy, feature bullet points, or care instructions.
+- Do NOT infer color from brand names (e.g. "Strawberry" ≠ pink).
+- logosAndGraphics must ONLY describe text/graphics physically printed on the fabric in THIS photo.
+- If the photo shows a model wearing the item, still describe the garment design visible in the photo.
 
-Return JSON describing how to reproduce this exact item visually.`,
+Return JSON.`,
             },
             {
               inlineData: {
@@ -167,14 +224,14 @@ Return JSON describing how to reproduce this exact item visually.`,
     const parsed = JSON.parse(text) as ProductVisualSpec;
     if (!parsed.primaryColor?.trim()) return fallbackVisualSpec(product);
 
-    return {
+    return sanitizeVisualSpec({
       primaryColor: parsed.primaryColor.trim(),
       accentColors: parsed.accentColors?.filter(Boolean),
       logosAndGraphics: parsed.logosAndGraphics?.trim(),
       patternAndTexture: parsed.patternAndTexture?.trim(),
       keyDetails: parsed.keyDetails?.filter(Boolean),
       reproductionNotes: parsed.reproductionNotes?.trim(),
-    };
+    });
   } catch (error) {
     console.error("Product visual analysis failed, using text fallback:", error);
     return fallbackVisualSpec(product);

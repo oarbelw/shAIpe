@@ -1,6 +1,7 @@
 import { readStoredFile, saveFile, storagePathFromUrl } from "@/lib/storage";
 import { buildTryOnPrompt, buildOutfitPrompt, type TryOnPromptContext } from "@/lib/promptBuilder";
 import { analyzeProductVisual, type ProductVisualSpec } from "@/lib/productVisualAnalysis";
+import { pickBestProductReferenceImage } from "@/lib/productImageSelection";
 import { getGeminiClient, GEMINI_IMAGE_MODEL } from "@/lib/gemini";
 import type { Product, User, UserImage, UserProfile } from "@prisma/client";
 
@@ -86,22 +87,21 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
     const client = getGeminiClient();
     if (!client) throw new Error("Gemini client not configured");
 
-    const productImageUrls = dedupeUrls([
+    const allProductUrls = dedupeUrls([
       ...(input.productImageUrls ?? []),
       ...(input.productImageUrl ? [input.productImageUrl] : []),
-    ]).slice(0, 3);
+    ]);
 
+    const bestProductUrl = await pickBestProductReferenceImage(input.product, allProductUrls);
     const productImages: ImageBytes[] = [];
-    for (const url of productImageUrls) {
-      const bytes = await loadImageBytes(url);
+    if (bestProductUrl) {
+      const bytes = await loadImageBytes(bestProductUrl);
       if (bytes) productImages.push(bytes);
     }
 
     const visualSpec =
       input.visualSpec ??
-      (productImageUrls[0]
-        ? await analyzeProductVisual(input.product, productImageUrls[0])
-        : null);
+      (bestProductUrl ? await analyzeProductVisual(input.product, bestProductUrl) : null);
 
     const imageUrls: string[] = [];
     let lastError: unknown;
@@ -124,19 +124,14 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       if (productImages.length > 0) {
         parts.push({
           text:
-            "PRODUCT REFERENCE — reproduce this exact garment (color, logos, text, trim, fabric). This overrides any brand-name color associations:",
+            "PRODUCT REFERENCE PHOTO — copy ONLY the garment design from this image (fabric color, printed logos/graphics on the fabric, trim). Do NOT copy or invent any website/marketing text. The product photo is the only source of truth:",
         });
-        for (let i = 0; i < productImages.length; i++) {
-          if (productImages.length > 1) {
-            parts.push({ text: `Product reference photo ${i + 1} of ${productImages.length}:` });
-          }
-          parts.push({
-            inlineData: {
-              data: productImages[i].data.toString("base64"),
-              mimeType: productImages[i].mimeType,
-            },
-          });
-        }
+        parts.push({
+          inlineData: {
+            data: productImages[0].data.toString("base64"),
+            mimeType: productImages[0].mimeType,
+          },
+        });
       }
 
       parts.push(
