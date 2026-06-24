@@ -230,6 +230,9 @@ function extractFromHtml(html: string, url: string): ScrapedProduct | null {
       ...(jsonLd?.colors ?? []),
       ...(nextData?.colors ?? []),
       ...(embedded?.colors ?? []),
+      ...extractColorsFromText(rawScrapedText),
+      ...extractColorsFromText(jsonLd?.description ?? ""),
+      ...extractColorsFromText(nextData?.description ?? ""),
     ]),
     material:
       jsonLd?.material ??
@@ -535,6 +538,17 @@ const FIT_RE =
 
 function extractFitFromText(text: string): string | undefined {
   return text.match(FIT_RE)?.[1]?.trim().slice(0, 200);
+}
+
+/** e.g. "Green with STRAWBERRY logo on front" from Shopify bullet lists. */
+function extractColorsFromText(text: string): string[] {
+  const colors = new Set<string>();
+  const colorWithPattern =
+    /\b(black|white|grey|gray|red|pink|orange|yellow|green|teal|emerald|olive|blue|navy|purple|brown|tan|beige|khaki)\s+with\b/gi;
+  for (const match of text.matchAll(colorWithPattern)) {
+    colors.add(match[1].toLowerCase());
+  }
+  return [...colors];
 }
 
 // ---------------------------------------------------------------------------

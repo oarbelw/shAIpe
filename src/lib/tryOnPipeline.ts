@@ -35,6 +35,7 @@ export async function runTryOnPipeline(tryOnId: string): Promise<void> {
       referenceImages,
       product,
       productImageUrl: productImages[0],
+      productImageUrls: productImages.slice(0, 3),
       selectedSize: tryOn.selectedSize,
       selectedColor: tryOn.selectedColor,
       userNotes: tryOn.userNotes,

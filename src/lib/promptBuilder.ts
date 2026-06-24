@@ -1,4 +1,6 @@
 import type { UserProfile, Product, User } from "@prisma/client";
+import type { ProductVisualSpec } from "@/lib/productVisualAnalysis";
+import { extractColorHintsFromProduct, formatVisualSpecForPrompt } from "@/lib/productVisualAnalysis";
 
 export type TryOnPromptContext = {
   user: User;
@@ -8,6 +10,7 @@ export type TryOnPromptContext = {
   selectedColor?: string | null;
   userNotes?: string | null;
   view: "front" | "side" | "back";
+  visualSpec?: ProductVisualSpec | null;
 };
 
 /**
@@ -15,7 +18,7 @@ export type TryOnPromptContext = {
  * passed to whichever ImageGenerationProvider is active.
  */
 export function buildTryOnPrompt(ctx: TryOnPromptContext): string {
-  const { profile, product } = ctx;
+  const { profile, product, visualSpec } = ctx;
 
   const measurements = [
     profile?.bustCm && `bust ${profile.bustCm}cm`,
@@ -29,7 +32,30 @@ export function buildTryOnPrompt(ctx: TryOnPromptContext): string {
     .filter(Boolean)
     .join(", ");
 
-  return `Generate a realistic ${ctx.view}-view try-on image of the user wearing the provided clothing item.
+  const scrapedColors = extractColorHintsFromProduct(product);
+  const colorLine = ctx.selectedColor
+    ? ctx.selectedColor
+    : visualSpec?.primaryColor
+      ? visualSpec.primaryColor
+      : scrapedColors.length > 0
+        ? scrapedColors.join(", ")
+        : "match the product reference image exactly";
+
+  const visualSpecBlock = visualSpec
+    ? `\nExact appearance to reproduce (from product photo analysis):\n${formatVisualSpecForPrompt(visualSpec)}`
+    : scrapedColors.length > 0
+      ? `\nColor hints from product page: ${scrapedColors.join(", ")}`
+      : "";
+
+  return `Generate a realistic ${ctx.view}-view try-on image of the user wearing the EXACT clothing item shown in the attached product reference photo(s).
+
+CRITICAL — PRODUCT FIDELITY (highest priority):
+- The attached product reference image(s) are the single source of truth for this garment's appearance.
+- Reproduce the EXACT colors, shades, logos, printed text, graphics, trim, piping, and construction details from the product photo.
+- Do NOT guess or invent colors based on the brand name, store name, or product title. Example: a brand like "Strawberry Milk Mob" or printed word "STRAWBERRY" does NOT mean pink or red unless the product photo shows pink/red fabric.
+- The generated garment must be visually identical to the reference product — same color, same graphics, same silhouette.
+${visualSpecBlock}
+
 Use the user's uploaded reference photos to preserve:
 - Face likeness
 - Body shape
@@ -38,14 +64,14 @@ Use the user's uploaded reference photos to preserve:
 - Height and proportions
 - General posture
 
-Clothing item:
+Clothing item metadata (secondary to the product photo):
 - Brand: ${product.brand ?? "unknown"}
 - Product name: ${product.title}
 - Category: ${product.category ?? "unknown"}
 - Material: ${product.material ?? "unknown"}
 - Fit description: ${product.fitDescription ?? "unknown"}
 - Selected size: ${ctx.selectedSize ?? "not specified"}
-- Color: ${ctx.selectedColor ?? "as shown"}
+- Color: ${colorLine}
 
 Body context:
 - Height: ${profile?.heightCm ? `${profile.heightCm} cm` : "unknown"}
@@ -55,7 +81,7 @@ Body context:
 - Preferred fit: ${profile?.preferredFit ?? "regular"}
 ${ctx.userNotes ? `\nUser notes: ${ctx.userNotes}` : ""}
 Render the item realistically on the user's body.
-Respect the actual material, cut, coverage, tightness, length, and silhouette.
+Respect the actual material, cut, coverage, tightness, length, and silhouette from the product reference.
 Do not make the user thinner, larger, younger, or more sexualized.
 Do not alter the user's face beyond normal lighting consistency.
 Use a clean neutral background.`;

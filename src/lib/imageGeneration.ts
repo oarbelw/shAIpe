@@ -1,5 +1,6 @@
 import { readStoredFile, saveFile, storagePathFromUrl } from "@/lib/storage";
 import { buildTryOnPrompt, buildOutfitPrompt, type TryOnPromptContext } from "@/lib/promptBuilder";
+import { analyzeProductVisual, type ProductVisualSpec } from "@/lib/productVisualAnalysis";
 import { getGeminiClient, GEMINI_IMAGE_MODEL } from "@/lib/gemini";
 import type { Product, User, UserImage, UserProfile } from "@prisma/client";
 
@@ -15,6 +16,9 @@ export type TryOnGenerationInput = {
   referenceImages: UserImage[];
   product: Product;
   productImageUrl?: string;
+  /** Up to 3 reference photos of the product for better fidelity. */
+  productImageUrls?: string[];
+  visualSpec?: ProductVisualSpec | null;
   selectedSize?: string | null;
   selectedColor?: string | null;
   userNotes?: string | null;
@@ -82,7 +86,23 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
     const client = getGeminiClient();
     if (!client) throw new Error("Gemini client not configured");
 
-    const productImage = await loadImageBytes(input.productImageUrl);
+    const productImageUrls = dedupeUrls([
+      ...(input.productImageUrls ?? []),
+      ...(input.productImageUrl ? [input.productImageUrl] : []),
+    ]).slice(0, 3);
+
+    const productImages: ImageBytes[] = [];
+    for (const url of productImageUrls) {
+      const bytes = await loadImageBytes(url);
+      if (bytes) productImages.push(bytes);
+    }
+
+    const visualSpec =
+      input.visualSpec ??
+      (productImageUrls[0]
+        ? await analyzeProductVisual(input.product, productImageUrls[0])
+        : null);
+
     const imageUrls: string[] = [];
     let lastError: unknown;
 
@@ -95,31 +115,39 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       const referenceImage = reference ? await loadImageBytes(reference.imageUrl) : null;
       if (!referenceImage) continue;
 
-      const prompt = buildTryOnPrompt({ ...promptContext(input), view });
+      const prompt = buildTryOnPrompt({ ...promptContext(input), view, visualSpec });
 
       const parts: Array<
         { text: string } | { inlineData: { data: string; mimeType: string } }
-      > = [
-        { text: prompt },
-        { text: "Reference photo of the user:" },
+      > = [{ text: prompt }];
+
+      if (productImages.length > 0) {
+        parts.push({
+          text:
+            "PRODUCT REFERENCE — reproduce this exact garment (color, logos, text, trim, fabric). This overrides any brand-name color associations:",
+        });
+        for (let i = 0; i < productImages.length; i++) {
+          if (productImages.length > 1) {
+            parts.push({ text: `Product reference photo ${i + 1} of ${productImages.length}:` });
+          }
+          parts.push({
+            inlineData: {
+              data: productImages[i].data.toString("base64"),
+              mimeType: productImages[i].mimeType,
+            },
+          });
+        }
+      }
+
+      parts.push(
+        { text: "USER REFERENCE — dress this person in the exact product shown above:" },
         {
           inlineData: {
             data: referenceImage.data.toString("base64"),
             mimeType: referenceImage.mimeType,
           },
-        },
-      ];
-      if (productImage) {
-        parts.push(
-          { text: "The clothing item to try on:" },
-          {
-            inlineData: {
-              data: productImage.data.toString("base64"),
-              mimeType: productImage.mimeType,
-            },
-          }
-        );
-      }
+        }
+      );
 
       try {
         const response = await client.models.generateContent({
@@ -474,6 +502,18 @@ function promptContext(input: TryOnGenerationInput): Omit<TryOnPromptContext, "v
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function dedupeUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of urls) {
+    const trimmed = url.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 async function loadImageBytes(url?: string | null): Promise<ImageBytes | null> {
   if (!url) return null;
