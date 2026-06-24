@@ -61,6 +61,70 @@ Do not alter the user's face beyond normal lighting consistency.
 Use a clean neutral background.`;
 }
 
+export type OutfitPromptItem = {
+  product: Product;
+  selectedSize?: string | null;
+  selectedColor?: string | null;
+};
+
+export function buildOutfitPrompt(ctx: {
+  user: User;
+  profile: UserProfile | null;
+  items: OutfitPromptItem[];
+  userNotes?: string | null;
+  view: "front" | "side" | "back";
+}): string {
+  const { profile, items } = ctx;
+
+  const measurements = [
+    profile?.bustCm && `bust ${profile.bustCm}cm`,
+    profile?.waistCm && `waist ${profile.waistCm}cm`,
+    profile?.hipsCm && `hips ${profile.hipsCm}cm`,
+    profile?.shoulderWidthCm && `shoulders ${profile.shoulderWidthCm}cm`,
+    profile?.jeanSize && `jean size ${profile.jeanSize}`,
+    profile?.dressSize && `dress size ${profile.dressSize}`,
+    profile?.shirtSize && `shirt size ${profile.shirtSize}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const itemList = items
+    .map((item, i) => {
+      const p = item.product;
+      return `${i + 1}. ${p.brand ? `${p.brand} ` : ""}${p.title} (${p.category ?? "clothing"})${
+        item.selectedSize ? `, size ${item.selectedSize}` : ""
+      }${item.selectedColor ? `, color ${item.selectedColor}` : ""}`;
+    })
+    .join("\n");
+
+  return `Generate a realistic ${ctx.view}-view image of the user wearing ALL of the following clothing items together as one cohesive outfit.
+Use the user's uploaded reference photos to preserve:
+- Face likeness
+- Body shape
+- Skin tone
+- Hair
+- Height and proportions
+- General posture
+
+Outfit items to combine (wear all of them together):
+${itemList}
+
+Each item below is shown as a reference image of how it looks on this user from a previous try-on. Combine them into a single natural outfit.
+
+Body context:
+- Height: ${profile?.heightCm ? `${profile.heightCm} cm` : "unknown"}
+- Weight: ${profile?.weightKg ? `${profile.weightKg} kg` : "unknown"}
+- Sex: ${profile?.sex ?? "unspecified"}
+- Measurements: ${measurements || "not provided"}
+- Preferred fit: ${profile?.preferredFit ?? "regular"}
+${ctx.userNotes ? `\nUser notes: ${ctx.userNotes}` : ""}
+Render all items realistically on the user's body together.
+Respect actual materials, cuts, coverage, and silhouettes.
+Do not make the user thinner, larger, younger, or more sexualized.
+Do not alter the user's face beyond normal lighting consistency.
+Use a clean neutral background.`;
+}
+
 export function buildFitAnalysisPrompt(ctx: {
   profile: UserProfile | null;
   product: Product;

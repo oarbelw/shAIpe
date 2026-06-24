@@ -28,6 +28,9 @@ export async function SiteHeader() {
                 <Link href="/try-ons">My try-ons</Link>
               </Button>
               <Button asChild variant="ghost" size="sm">
+                <Link href="/fitting-room">Fitting room</Link>
+              </Button>
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/profile">Profile</Link>
               </Button>
               <Button asChild size="sm" className="ml-2">

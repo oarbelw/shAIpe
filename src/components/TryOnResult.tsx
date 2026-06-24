@@ -19,10 +19,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { FitAnalysisCard } from "@/components/FitAnalysisCard";
-import type { SerializedTryOn, SerializedVariation } from "@/lib/serializers";
+import { AddToClosetButton } from "@/components/AddToClosetButton";
+import { outfitDisplayTitle, type SerializedTryOn, type SerializedVariation } from "@/lib/serializers";
 
-const VIEW_LABELS = ["Front view", "Side view", "Back view"];
-const TOTAL_VIEWS = 3;
+const SINGLE_VIEW_LABELS = ["Front view", "Side view", "Back view"];
+const OUTFIT_VIEW_LABELS = ["Front view"];
 const POLL_INTERVAL_MS = 2500;
 const SLOW_THRESHOLD_S = 180;
 
@@ -46,7 +47,9 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
   const [remixSubmitting, setRemixSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const tryOnRef = useRef(tryOn);
-  tryOnRef.current = tryOn;
+  useEffect(() => {
+    tryOnRef.current = tryOn;
+  }, [tryOn]);
 
   const isGenerating =
     tryOn.status === "generating" ||
@@ -111,19 +114,31 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
 
   const product = tryOn.product;
   const productImage = product?.images[0];
+  const isOutfit = tryOn.kind === "outfit";
+  const viewLabels = isOutfit ? OUTFIT_VIEW_LABELS : SINGLE_VIEW_LABELS;
+  const totalViews = viewLabels.length;
   const imagesDone = tryOn.generatedImages.length;
-  const showRemix = tryOn.status === "completed" && !tryOn.parentId;
+  const showRemix = tryOn.status === "completed" && !tryOn.parentId && !isOutfit;
+  const showCloset = tryOn.status === "completed" && !tryOn.parentId && !isOutfit;
+  const pageTitle = isOutfit ? outfitDisplayTitle(tryOn) : "Your try-on preview";
 
   return (
     <div className="space-y-6">
       {/* Generated images */}
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Your try-on preview</h2>
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">
+              {isOutfit ? "Your outfit preview" : pageTitle}
+            </h2>
+            {isOutfit && (
+              <p className="text-sm text-muted-foreground">{outfitDisplayTitle(tryOn)}</p>
+            )}
+          </div>
           {tryOn.status === "generating" && (
             <span className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Generating image {Math.min(imagesDone + 1, TOTAL_VIEWS)} of {TOTAL_VIEWS}…
+              Generating image {Math.min(imagesDone + 1, totalViews)} of {totalViews}…
             </span>
           )}
         </div>
@@ -139,8 +154,8 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
           </Card>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {Array.from({ length: TOTAL_VIEWS }).map((_, i) => {
+            <div className={`grid gap-4 ${isOutfit ? "max-w-md" : "sm:grid-cols-3"}`}>
+              {Array.from({ length: totalViews }).map((_, i) => {
                 const url = tryOn.generatedImages[i];
                 return (
                   <div key={i} className="space-y-2">
@@ -148,7 +163,7 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
                         src={url}
-                        alt={VIEW_LABELS[i] ?? `Generated view ${i + 1}`}
+                        alt={viewLabels[i] ?? `Generated view ${i + 1}`}
                         className="aspect-[3/4] w-full rounded-lg border object-cover"
                       />
                     ) : (
@@ -164,7 +179,7 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">
-                        {VIEW_LABELS[i] ?? `View ${i + 1}`}
+                        {viewLabels[i] ?? `View ${i + 1}`}
                       </span>
                       {url && (
                         <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
@@ -208,8 +223,57 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {isOutfit && tryOn.outfitItems.length > 0 && (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">Outfit items</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {tryOn.outfitItems.map((link) => {
+                  const closet = link.closetItem;
+                  const itemProduct = closet.tryOn.product;
+                  const thumb = closet.thumbnailUrl;
+                  return (
+                    <div key={link.id} className="flex gap-3 rounded-lg border p-3">
+                      {thumb && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={thumb}
+                          alt={itemProduct?.title ?? "Closet item"}
+                          className="h-24 w-20 shrink-0 rounded-md border object-cover"
+                        />
+                      )}
+                      <div className="min-w-0 space-y-1 text-sm">
+                        {itemProduct?.brand && (
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            {itemProduct.brand}
+                          </p>
+                        )}
+                        <p className="font-medium">{closet.label ?? itemProduct?.title ?? "Item"}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {closet.tryOn.selectedSize && (
+                            <Badge variant="outline" className="text-[10px]">
+                              Size {closet.tryOn.selectedSize}
+                            </Badge>
+                          )}
+                          {closet.tryOn.selectedColor && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {closet.tryOn.selectedColor}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Product details */}
-        {product && (
+        {product && !isOutfit && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Product</CardTitle>
@@ -261,7 +325,8 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
         )}
 
         {/* Fit analysis (streams in while images generate) */}
-        {tryOn.fitPrediction || tryOn.fitExplanation ? (
+        {!isOutfit &&
+          (tryOn.fitPrediction || tryOn.fitExplanation ? (
           <FitAnalysisCard
             fitPrediction={tryOn.fitPrediction}
             recommendedSize={tryOn.recommendedSize}
@@ -286,7 +351,7 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
               </p>
             </CardContent>
           </Card>
-        ) : null}
+        ) : null)}
       </div>
 
       {tryOn.userNotes && (
@@ -294,6 +359,8 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
           <span className="font-medium text-foreground">Your notes:</span> {tryOn.userNotes}
         </p>
       )}
+
+      {showCloset && <AddToClosetButton tryOnId={tryOn.id} />}
 
       {/* Remix / variations */}
       {showRemix && (
@@ -355,9 +422,15 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button asChild>
-          <Link href="/try-on/new">Try on something else</Link>
-        </Button>
+        {isOutfit ? (
+          <Button asChild>
+            <Link href="/fitting-room">Back to fitting room</Link>
+          </Button>
+        ) : (
+          <Button asChild>
+            <Link href="/try-on/new">Try on something else</Link>
+          </Button>
+        )}
         <Button asChild variant="outline">
           <Link href="/try-ons">View all try-ons</Link>
         </Button>

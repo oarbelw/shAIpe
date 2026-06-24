@@ -1,5 +1,5 @@
 import { readStoredFile, saveFile, storagePathFromUrl } from "@/lib/storage";
-import { buildTryOnPrompt, type TryOnPromptContext } from "@/lib/promptBuilder";
+import { buildTryOnPrompt, buildOutfitPrompt, type TryOnPromptContext } from "@/lib/promptBuilder";
 import { getGeminiClient, GEMINI_IMAGE_MODEL } from "@/lib/gemini";
 import type { Product, User, UserImage, UserProfile } from "@prisma/client";
 
@@ -38,9 +38,27 @@ export type VariationGenerationInput = {
   variationPrompt: string;
 };
 
+export type OutfitItemInput = {
+  product: Product;
+  artifactImageUrl: string;
+  selectedSize?: string | null;
+  selectedColor?: string | null;
+};
+
+export type OutfitGenerationInput = {
+  user: User;
+  profile: UserProfile | null;
+  referenceImages: UserImage[];
+  items: OutfitItemInput[];
+  userNotes?: string | null;
+  views: Array<"front" | "side" | "back">;
+  onImage?: (url: string) => Promise<void> | void;
+};
+
 export interface ImageGenerationProvider {
   generateTryOn(input: TryOnGenerationInput): Promise<TryOnGenerationResult>;
   generateVariation(input: VariationGenerationInput): Promise<TryOnGenerationResult>;
+  generateOutfit(input: OutfitGenerationInput): Promise<TryOnGenerationResult>;
 }
 
 export function getImageGenerationProvider(): ImageGenerationProvider {
@@ -198,6 +216,102 @@ Rules:
 
     return { imageUrls: [saved.url], provider: `gemini:${GEMINI_IMAGE_MODEL}` };
   }
+
+  async generateOutfit(input: OutfitGenerationInput): Promise<TryOnGenerationResult> {
+    const client = getGeminiClient();
+    if (!client) throw new Error("Gemini client not configured");
+
+    const imageUrls: string[] = [];
+    let lastError: unknown;
+
+    for (const view of input.views) {
+      const reference =
+        input.referenceImages.find((img) => img.angle === view) ??
+        input.referenceImages.find((img) => img.angle === "front") ??
+        input.referenceImages[0];
+
+      const referenceImage = reference ? await loadImageBytes(reference.imageUrl) : null;
+      if (!referenceImage) continue;
+
+      const prompt = buildOutfitPrompt({
+        user: input.user,
+        profile: input.profile,
+        items: input.items.map((item) => ({
+          product: item.product,
+          selectedSize: item.selectedSize,
+          selectedColor: item.selectedColor,
+        })),
+        userNotes: input.userNotes,
+        view,
+      });
+
+      const parts: Array<
+        { text: string } | { inlineData: { data: string; mimeType: string } }
+      > = [
+        { text: prompt },
+        { text: "Reference photo of the user:" },
+        {
+          inlineData: {
+            data: referenceImage.data.toString("base64"),
+            mimeType: referenceImage.mimeType,
+          },
+        },
+      ];
+
+      for (let i = 0; i < input.items.length; i++) {
+        const item = input.items[i];
+        const artifact = await loadImageBytes(item.artifactImageUrl);
+        const label = `${item.product.brand ? item.product.brand + " " : ""}${item.product.title}`;
+        parts.push({ text: `Clothing item ${i + 1} (${label}) — reference from previous try-on:` });
+        if (artifact) {
+          parts.push({
+            inlineData: {
+              data: artifact.data.toString("base64"),
+              mimeType: artifact.mimeType,
+            },
+          });
+        }
+      }
+
+      try {
+        const response = await client.models.generateContent({
+          model: GEMINI_IMAGE_MODEL,
+          contents: [{ role: "user", parts }],
+          config: {
+            responseModalities: ["IMAGE"],
+            imageConfig: { aspectRatio: "3:4" },
+          },
+        });
+
+        const generated = extractImagePart(response);
+        if (!generated) {
+          lastError = new Error(`Gemini returned no image for outfit ${view} view`);
+          console.error(lastError);
+          continue;
+        }
+
+        const saved = await saveFile(
+          input.user.id,
+          Buffer.from(generated.data, "base64"),
+          generated.mimeType,
+          `outfit-${view}`
+        );
+        imageUrls.push(saved.url);
+        await input.onImage?.(saved.url);
+      } catch (error) {
+        lastError = error;
+        console.error(`Gemini outfit generation failed for ${view} view:`, error);
+      }
+    }
+
+    if (imageUrls.length === 0) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error("Gemini outfit generation produced no images");
+    }
+
+    return { imageUrls, provider: `gemini:${GEMINI_IMAGE_MODEL}` };
+  }
 }
 
 type GeminiResponseLike = {
@@ -291,6 +405,58 @@ class MockImageGenerationProvider implements ImageGenerationProvider {
     );
 
     return { imageUrls: [saved.url], provider: "mock" };
+  }
+
+  async generateOutfit(input: OutfitGenerationInput): Promise<TryOnGenerationResult> {
+    const imageUrls: string[] = [];
+    const titles = input.items.map((i) => i.product.title).join(" + ");
+
+    for (const view of input.views) {
+      buildOutfitPrompt({
+        user: input.user,
+        profile: input.profile,
+        items: input.items.map((item) => ({
+          product: item.product,
+          selectedSize: item.selectedSize,
+          selectedColor: item.selectedColor,
+        })),
+        userNotes: input.userNotes,
+        view,
+      });
+
+      const reference =
+        input.referenceImages.find((img) => img.angle === view) ??
+        input.referenceImages.find((img) => img.angle === "front") ??
+        input.referenceImages[0];
+
+      const referenceImage = reference
+        ? await loadImageAsDataUri(reference.imageUrl)
+        : null;
+
+      const firstArtifact = input.items[0]
+        ? await loadImageAsDataUri(input.items[0].artifactImageUrl)
+        : null;
+
+      const svg = renderMockSvg({
+        view,
+        productTitle: `Outfit: ${titles}`,
+        brand: `${input.items.length} items`,
+        selectedSize: null,
+        referenceImage,
+        productImage: firstArtifact,
+      });
+
+      const saved = await saveFile(
+        input.user.id,
+        Buffer.from(svg, "utf-8"),
+        "image/svg+xml",
+        `outfit-${view}`
+      );
+      imageUrls.push(saved.url);
+      await input.onImage?.(saved.url);
+    }
+
+    return { imageUrls, provider: "mock" };
   }
 }
 

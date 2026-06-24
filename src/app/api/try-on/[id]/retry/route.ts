@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { runTryOnPipeline, runVariationPipeline } from "@/lib/tryOnPipeline";
+import { runTryOnPipeline, runVariationPipeline, runOutfitPipeline } from "@/lib/tryOnPipeline";
 import { serializeTryOn } from "@/lib/serializers";
 import { handleApiError } from "@/lib/apiHelpers";
 
@@ -26,10 +26,23 @@ export async function POST(
     const updated = await db.tryOn.update({
       where: { id },
       data: { status: "generating" },
-      include: { product: true },
+      include: {
+        product: true,
+        outfitItems: {
+          include: {
+            closetItem: {
+              include: { tryOn: { include: { product: true } } },
+            },
+          },
+        },
+      },
     });
 
-    after(() => (tryOn.parentId ? runVariationPipeline(id) : runTryOnPipeline(id)));
+    after(() => {
+      if (tryOn.parentId) return runVariationPipeline(id);
+      if (tryOn.kind === "outfit") return runOutfitPipeline(id);
+      return runTryOnPipeline(id);
+    });
 
     return NextResponse.json({ tryOn: serializeTryOn(updated) });
   } catch (error) {

@@ -9,7 +9,16 @@ export async function GET() {
     const user = await requireUser();
     const tryOns = await db.tryOn.findMany({
       where: { userId: user.id, parentId: null },
-      include: { product: true },
+      include: {
+        product: true,
+        outfitItems: {
+          include: {
+            closetItem: {
+              include: { tryOn: { include: { product: true } } },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ tryOns: tryOns.map(serializeTryOn) });

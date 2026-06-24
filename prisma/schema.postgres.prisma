@@ -20,6 +20,7 @@ model User {
   profile UserProfile?
   images  UserImage[]
   tryOns  TryOn[]
+  closetItems ClosetItem[]
 }
 
 model UserProfile {
@@ -100,8 +101,35 @@ model TryOn {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  kind            String   @default("single")
+
   parentId        String?
   parent          TryOn?   @relation("TryOnVariations", fields: [parentId], references: [id], onDelete: Cascade)
   variations      TryOn[]  @relation("TryOnVariations")
   variationPrompt String?
+
+  closetSource ClosetItem?
+  outfitItems  OutfitTryOnItem[] @relation("OutfitItems")
+}
+
+model ClosetItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tryOnId   String   @unique
+  tryOn     TryOn    @relation(fields: [tryOnId], references: [id], onDelete: Cascade)
+  label     String?
+  createdAt DateTime @default(now())
+
+  outfitLinks OutfitTryOnItem[]
+}
+
+model OutfitTryOnItem {
+  id            String     @id @default(cuid())
+  outfitTryOnId String
+  outfitTryOn   TryOn      @relation("OutfitItems", fields: [outfitTryOnId], references: [id], onDelete: Cascade)
+  closetItemId  String
+  closetItem    ClosetItem @relation(fields: [closetItemId], references: [id], onDelete: Restrict)
+
+  @@unique([outfitTryOnId, closetItemId])
 }

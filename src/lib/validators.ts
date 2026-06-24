@@ -137,6 +137,16 @@ export const variationRequestSchema = z.object({
     .max(300),
 });
 
+export const addToClosetSchema = z.object({
+  tryOnId: z.string().min(1),
+  label: z.string().trim().max(100).optional(),
+});
+
+export const outfitRequestSchema = z.object({
+  closetItemIds: z.array(z.string().min(1)).min(2, "Select at least 2 items").max(6),
+  notes: z.string().trim().max(1000).optional(),
+});
+
 export type FitAnalysis = {
   predictedFit: FitPrediction;
   recommendedSize?: string;

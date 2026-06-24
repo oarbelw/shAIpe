@@ -12,7 +12,16 @@ export default async function TryOnsPage() {
 
   const tryOns = await db.tryOn.findMany({
     where: { userId: user.id, parentId: null },
-    include: { product: true },
+    include: {
+      product: true,
+      outfitItems: {
+        include: {
+          closetItem: {
+            include: { tryOn: { include: { product: true } } },
+          },
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 

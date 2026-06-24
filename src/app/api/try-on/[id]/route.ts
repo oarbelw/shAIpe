@@ -18,6 +18,13 @@ export async function GET(
       include: {
         product: true,
         variations: { orderBy: { createdAt: "asc" } },
+        outfitItems: {
+          include: {
+            closetItem: {
+              include: { tryOn: { include: { product: true } } },
+            },
+          },
+        },
       },
     });
     if (!tryOn || tryOn.userId !== user.id) {
@@ -41,10 +48,23 @@ export async function DELETE(
 
     const tryOn = await db.tryOn.findUnique({
       where: { id },
-      include: { variations: true },
+      include: {
+        variations: true,
+        closetSource: { include: { outfitLinks: true } },
+      },
     });
     if (!tryOn || tryOn.userId !== user.id) {
       return NextResponse.json({ error: "Try-on not found" }, { status: 404 });
+    }
+
+    if (tryOn.closetSource && tryOn.closetSource.outfitLinks.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This try-on is saved in your closet and used in an outfit preview. Remove it from those outfits first.",
+        },
+        { status: 409 }
+      );
     }
 
     const filePaths = [tryOn, ...tryOn.variations]

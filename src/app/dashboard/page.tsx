@@ -15,7 +15,16 @@ export default async function DashboardPage() {
     db.userImage.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" } }),
     db.tryOn.findMany({
       where: { userId: user.id, parentId: null },
-      include: { product: true },
+      include: {
+        product: true,
+        outfitItems: {
+          include: {
+            closetItem: {
+              include: { tryOn: { include: { product: true } } },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
       take: 6,
     }),

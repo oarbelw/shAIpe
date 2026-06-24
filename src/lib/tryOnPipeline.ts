@@ -145,3 +145,99 @@ async function markFailed(tryOnId: string): Promise<void> {
     .update({ where: { id: tryOnId }, data: { status: "failed" } })
     .catch(() => {});
 }
+
+const outfitInclude = {
+  outfitItems: {
+    include: {
+      closetItem: {
+        include: {
+          tryOn: { include: { product: true } },
+        },
+      },
+    },
+  },
+} as const;
+
+function resolveArtifactUrl(
+  generatedImages: string[],
+  productImages: string[]
+): string | undefined {
+  return generatedImages[0] ?? productImages[0];
+}
+
+/**
+ * Generates an outfit try-on from multiple virtual-closet items.
+ */
+export async function runOutfitPipeline(tryOnId: string): Promise<void> {
+  const tryOn = await db.tryOn.findUnique({
+    where: { id: tryOnId },
+    include: {
+      user: { include: { profile: true } },
+      ...outfitInclude,
+    },
+  });
+
+  if (!tryOn || tryOn.kind !== "outfit" || tryOn.outfitItems.length < 2) {
+    await markFailed(tryOnId);
+    return;
+  }
+
+  const referenceImages = await db.userImage.findMany({
+    where: { userId: tryOn.userId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const outfitItemsInput = [];
+  for (const link of tryOn.outfitItems) {
+    const source = link.closetItem.tryOn;
+    const product = source.product;
+    if (!product) {
+      await markFailed(tryOnId);
+      return;
+    }
+    const generatedImages = parseJsonArray(source.generatedImages);
+    const productImages = parseJsonArray(product.images);
+    const artifactImageUrl = resolveArtifactUrl(generatedImages, productImages);
+    if (!artifactImageUrl) {
+      await markFailed(tryOnId);
+      return;
+    }
+    outfitItemsInput.push({
+      product,
+      artifactImageUrl,
+      selectedSize: source.selectedSize,
+      selectedColor: source.selectedColor,
+    });
+  }
+
+  const collectedImages: string[] = [];
+
+  try {
+    const result = await getImageGenerationProvider().generateOutfit({
+      user: tryOn.user,
+      profile: tryOn.user.profile,
+      referenceImages,
+      items: outfitItemsInput,
+      userNotes: tryOn.userNotes,
+      views: ["front"],
+      onImage: async (url) => {
+        collectedImages.push(url);
+        await db.tryOn.update({
+          where: { id: tryOnId },
+          data: { generatedImages: toJsonArray(collectedImages) },
+        });
+      },
+    });
+
+    await db.tryOn.update({
+      where: { id: tryOnId },
+      data: {
+        status: "completed",
+        generatedImages: toJsonArray(result.imageUrls),
+      },
+    });
+  } catch (error) {
+    console.error(`Outfit ${tryOnId} generation failed:`, error);
+    await markFailed(tryOnId);
+  }
+}

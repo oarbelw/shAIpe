@@ -31,6 +31,12 @@ export async function POST(
         { status: 400 }
       );
     }
+    if (parent.kind === "outfit") {
+      return NextResponse.json(
+        { error: "Outfit try-ons cannot be remixed. Try a new combination in the fitting room." },
+        { status: 400 }
+      );
+    }
     if (parent.status !== "completed" || parseJsonArray(parent.generatedImages).length === 0) {
       return NextResponse.json(
         { error: "Wait for the try-on to finish before creating variations." },

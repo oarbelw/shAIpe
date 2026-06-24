@@ -17,7 +17,7 @@ import { scrapedProductSchema, type ScrapedProduct } from "@/lib/validators";
  */
 
 export async function scrapeProduct(url: string): Promise<ScrapedProduct> {
-  let html = await fetchStatic(url);
+  const html = await fetchStatic(url);
   let result = html && !isBlockedPage(html) ? extractFromHtml(html, url) : null;
 
   if (!result || isLowQuality(result)) {

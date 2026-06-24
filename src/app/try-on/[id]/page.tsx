@@ -15,7 +15,17 @@ export default async function TryOnResultPage({
   const { id } = await params;
   const tryOn = await db.tryOn.findUnique({
     where: { id },
-    include: { product: true, variations: { orderBy: { createdAt: "asc" } } },
+    include: {
+      product: true,
+      variations: { orderBy: { createdAt: "asc" } },
+      outfitItems: {
+        include: {
+          closetItem: {
+            include: { tryOn: { include: { product: true } } },
+          },
+        },
+      },
+    },
   });
   if (!tryOn || tryOn.userId !== user.id) notFound();
 
