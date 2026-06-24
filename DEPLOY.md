@@ -87,9 +87,15 @@ In the **web service** → **Variables**, add:
 
 Uploaded images are stored on disk. Without a volume, they **disappear on redeploy**.
 
-1. Click your web service → **Settings** → **Volumes**.
-2. Add a volume: mount path **`/app/uploads`**, size 1 GB (or more).
-3. The app already uses `UPLOADS_DIR=/app/uploads` in the Dockerfile.
+Railway adds volumes from the **project canvas**, not under service Settings:
+
+1. On the project canvas, press **`⌘K`** (Mac) or **`Ctrl+K`** (Windows) to open the command palette, **or** right-click empty space on the canvas.
+2. Choose **Create Volume** (or **Add Volume**).
+3. Select your **shAIpe** web service when prompted.
+4. Set mount path to **`/app/uploads`**.
+5. Redeploy the service (Railway may restart automatically).
+
+The Dockerfile already sets `UPLOADS_DIR=/app/uploads`. Free/trial plans include a small default volume size (0.5 GB); you can resize later on a paid plan.
 
 ### Public URL
 

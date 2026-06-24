@@ -2,9 +2,9 @@
 FROM node:20-bookworm AS base
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies (skip postinstall — schema not copied yet)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # App source (use PostgreSQL schema in production)
 COPY . .
