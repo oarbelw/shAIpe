@@ -34,7 +34,8 @@ export default async function ProfilePage() {
         <div>
           <h2 className="text-lg font-semibold">Reference photos</h2>
           <p className="text-sm text-muted-foreground">
-            Front, side, and back photos give the best results.
+            A clear front and back photo give the best results. A face close-up sharpens
+            your likeness even more.
           </p>
         </div>
         <ImageUploader initialImages={images} />

@@ -6,7 +6,7 @@ import { z } from "zod";
 
 export const SEX_OPTIONS = ["female", "male", "non_binary", "prefer_not_to_say"] as const;
 export const PREFERRED_FIT_OPTIONS = ["tight", "regular", "loose", "oversized"] as const;
-export const IMAGE_ANGLES = ["front", "side", "back", "face", "other"] as const;
+export const IMAGE_ANGLES = ["front", "back", "face", "other"] as const;
 export const FIT_PREDICTIONS = ["too_small", "tight", "true_to_size", "relaxed", "too_large"] as const;
 
 export type Sex = (typeof SEX_OPTIONS)[number];

@@ -39,7 +39,7 @@ export async function runTryOnPipeline(tryOnId: string): Promise<void> {
       selectedSize: tryOn.selectedSize,
       selectedColor: tryOn.selectedColor,
       userNotes: tryOn.userNotes,
-      views: ["front", "side", "back"],
+      views: ["front", "back"],
       onImage: async (url) => {
         collectedImages.push(url);
         await db.tryOn.update({

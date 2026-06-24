@@ -17,7 +17,7 @@ const STEPS = [
   {
     title: "Get realistic try-on previews",
     description:
-      "See front, side, and back previews of the item on you — not on a model.",
+      "See front and back previews of the item on you — not on a model.",
   },
   {
     title: "Fit and sizing guidance",

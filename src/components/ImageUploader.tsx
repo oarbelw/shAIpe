@@ -8,7 +8,6 @@ import type { ImageAngle } from "@/lib/validators";
 
 const SLOTS: Array<{ angle: ImageAngle; label: string; required: boolean }> = [
   { angle: "front", label: "Front", required: true },
-  { angle: "side", label: "Side", required: true },
   { angle: "back", label: "Back", required: true },
   { angle: "face", label: "Face close-up", required: false },
   { angle: "other", label: "Extra", required: false },
@@ -67,12 +66,13 @@ export function ImageUploader({
     <div className="space-y-4">
       <Alert>
         <AlertDescription>
-          For best results: good lighting, neutral pose, full body visible, minimal baggy
-          clothing, no heavy filters or mirror distortion.
+          For the most accurate, true-to-you previews: good even lighting, a neutral
+          straight-on pose, full body visible, snug (not baggy) clothing, and no heavy filters
+          or mirror distortion. Adding a clear face close-up sharpens your likeness.
         </AlertDescription>
       </Alert>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {SLOTS.map((slot) => (
           <UploadSlot
             key={slot.angle}

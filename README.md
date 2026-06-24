@@ -24,14 +24,14 @@ GEMINI_IMAGE_MODEL=gemini-3.1-flash-image   # optional, this is the default
 GEMINI_TEXT_MODEL=gemini-2.5-flash          # optional, this is the default
 ```
 
-- **Try-on images** — one Gemini image-model call per view (front/side/back), conditioned on the matching user reference photo + the product image (`src/lib/imageGeneration.ts`).
+- **Try-on images** — one Gemini image-model call per view (front/back), each conditioned on all of the user's reference photos + the product image(s) so identity and garment stay faithful (`src/lib/imageGeneration.ts`).
 - **Fit analysis** — one Gemini text-model call with structured JSON output, fed the user profile and the scraped product data (`src/lib/fitAnalysis.ts`). Falls back to the heuristic analyzer if the call fails.
 
 ## What's included (MVP)
 
 - **Demo auth** — sign in with any email (cookie session). Swap for Clerk/NextAuth/Supabase in `src/lib/auth.ts`.
 - **Body profile** — basics, usual sizes, measurements, and fit notes (`/profile`, `/onboarding`).
-- **Reference photo uploads** — front/side/back (+ optional face/extra), stored privately on disk under `uploads/` and served only to the owning user via `/api/files/...`.
+- **Reference photo uploads** — front/back (+ optional face/extra), stored privately on disk under `uploads/` and served only to the owning user via `/api/files/...`. Every uploaded photo is passed to each generation so the result locks onto the user's real identity.
 - **Product scraper** — static fetch + cheerio with JSON-LD, Open Graph, and visible-text fallbacks (`src/lib/scraper.ts`). For JS-heavy retail sites, install the optional Playwright fallback: `npm i playwright && npx playwright install chromium` — the scraper picks it up automatically.
 - **Manual product image upload** — for when scraping fails.
 - **Try-on generation** — Gemini image generation when `GEMINI_API_KEY` is set; otherwise a mock provider that composites preview cards so the flow works without a key (`src/lib/imageGeneration.ts`). Generation runs asynchronously (`src/lib/tryOnPipeline.ts`): the results page polls and shows images live as each view completes, with fit analysis streaming in alongside.

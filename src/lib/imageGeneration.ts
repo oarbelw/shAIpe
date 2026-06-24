@@ -23,7 +23,7 @@ export type TryOnGenerationInput = {
   selectedSize?: string | null;
   selectedColor?: string | null;
   userNotes?: string | null;
-  views: Array<"front" | "side" | "back">;
+  views: Array<"front" | "back">;
   /** Called as each view finishes, so the UI can show images progressively. */
   onImage?: (url: string) => Promise<void> | void;
 };
@@ -56,7 +56,7 @@ export type OutfitGenerationInput = {
   referenceImages: UserImage[];
   items: OutfitItemInput[];
   userNotes?: string | null;
-  views: Array<"front" | "side" | "back">;
+  views: Array<"front" | "back">;
   onImage?: (url: string) => Promise<void> | void;
 };
 
@@ -92,10 +92,16 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       ...(input.productImageUrl ? [input.productImageUrl] : []),
     ]);
 
+    // Use the clearest product photo as the primary reference, but also pass
+    // additional angles (e.g. a back shot) so the garment matches every view.
     const bestProductUrl = await pickBestProductReferenceImage(input.product, allProductUrls);
+    const orderedProductUrls = dedupeUrls([
+      ...(bestProductUrl ? [bestProductUrl] : []),
+      ...allProductUrls,
+    ]).slice(0, 3);
     const productImages: ImageBytes[] = [];
-    if (bestProductUrl) {
-      const bytes = await loadImageBytes(bestProductUrl);
+    for (const url of orderedProductUrls) {
+      const bytes = await loadImageBytes(url);
       if (bytes) productImages.push(bytes);
     }
 
@@ -103,17 +109,30 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       input.visualSpec ??
       (bestProductUrl ? await analyzeProductVisual(input.product, bestProductUrl) : null);
 
+    // Load ALL of the user's reference photos once. Passing every angle to each
+    // generation gives the model the strongest possible identity signal so the
+    // result is unmistakably the same person.
+    const loadedReferences = (
+      await Promise.all(
+        input.referenceImages.map(async (img) => ({
+          angle: img.angle,
+          bytes: await loadImageBytes(img.imageUrl),
+        }))
+      )
+    ).filter((r): r is { angle: string; bytes: ImageBytes } => Boolean(r.bytes));
+
     const imageUrls: string[] = [];
     let lastError: unknown;
 
     for (const view of input.views) {
-      const reference =
-        input.referenceImages.find((img) => img.angle === view) ??
-        input.referenceImages.find((img) => img.angle === "front") ??
-        input.referenceImages[0];
-
-      const referenceImage = reference ? await loadImageBytes(reference.imageUrl) : null;
-      if (!referenceImage) continue;
+      // Put the photo matching this view first, then the rest ordered by how
+      // useful they are for identity (face close-up first, then front).
+      const matching = loadedReferences.filter((r) => r.angle === view);
+      const others = loadedReferences
+        .filter((r) => r.angle !== view)
+        .sort((a, b) => referenceAnglePriority(a.angle) - referenceAnglePriority(b.angle));
+      const orderedRefs = [...matching, ...others];
+      if (orderedRefs.length === 0) continue;
 
       const prompt = buildTryOnPrompt({ ...promptContext(input), view, visualSpec });
 
@@ -124,25 +143,28 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
       if (productImages.length > 0) {
         parts.push({
           text:
-            "PRODUCT REFERENCE PHOTO — copy ONLY the garment design from this image (fabric color, printed logos/graphics on the fabric, trim). Do NOT copy or invent any website/marketing text. The product photo is the only source of truth:",
+            productImages.length === 1
+              ? "PRODUCT REFERENCE PHOTO — the ONLY source of truth for the garment. Copy its exact fabric color, printed graphics/logos on the fabric, trim, cut, and construction. Do NOT copy any website/marketing text:"
+              : "PRODUCT REFERENCE PHOTOS — these show the SAME garment from multiple angles and are the ONLY source of truth for it. Copy its exact fabric color, printed graphics/logos, trim, cut, and construction; use whichever angle matches this view. Do NOT copy any website/marketing text:",
         });
-        parts.push({
-          inlineData: {
-            data: productImages[0].data.toString("base64"),
-            mimeType: productImages[0].mimeType,
-          },
-        });
+        for (const img of productImages) {
+          parts.push({
+            inlineData: { data: img.data.toString("base64"), mimeType: img.mimeType },
+          });
+        }
       }
 
-      parts.push(
-        { text: "USER REFERENCE — dress this person in the exact product shown above:" },
-        {
-          inlineData: {
-            data: referenceImage.data.toString("base64"),
-            mimeType: referenceImage.mimeType,
-          },
-        }
-      );
+      parts.push({
+        text:
+          orderedRefs.length === 1
+            ? "USER REFERENCE PHOTO — this is the exact, specific real person to render. Preserve their identity perfectly (face, body, skin tone, hair) and dress THEM in the product shown above:"
+            : "USER REFERENCE PHOTOS — these are the SAME specific real person from multiple angles. Preserve their exact identity (face, body, skin tone, hair) and dress THEM in the product shown above:",
+      });
+      for (const ref of orderedRefs) {
+        parts.push({
+          inlineData: { data: ref.bytes.data.toString("base64"), mimeType: ref.bytes.mimeType },
+        });
+      }
 
       try {
         const response = await client.models.generateContent({
@@ -244,17 +266,25 @@ Rules:
     const client = getGeminiClient();
     if (!client) throw new Error("Gemini client not configured");
 
+    const loadedReferences = (
+      await Promise.all(
+        input.referenceImages.map(async (img) => ({
+          angle: img.angle,
+          bytes: await loadImageBytes(img.imageUrl),
+        }))
+      )
+    ).filter((r): r is { angle: string; bytes: ImageBytes } => Boolean(r.bytes));
+
     const imageUrls: string[] = [];
     let lastError: unknown;
 
     for (const view of input.views) {
-      const reference =
-        input.referenceImages.find((img) => img.angle === view) ??
-        input.referenceImages.find((img) => img.angle === "front") ??
-        input.referenceImages[0];
-
-      const referenceImage = reference ? await loadImageBytes(reference.imageUrl) : null;
-      if (!referenceImage) continue;
+      const matching = loadedReferences.filter((r) => r.angle === view);
+      const others = loadedReferences
+        .filter((r) => r.angle !== view)
+        .sort((a, b) => referenceAnglePriority(a.angle) - referenceAnglePriority(b.angle));
+      const orderedRefs = [...matching, ...others];
+      if (orderedRefs.length === 0) continue;
 
       const prompt = buildOutfitPrompt({
         user: input.user,
@@ -272,14 +302,18 @@ Rules:
         { text: string } | { inlineData: { data: string; mimeType: string } }
       > = [
         { text: prompt },
-        { text: "Reference photo of the user:" },
         {
-          inlineData: {
-            data: referenceImage.data.toString("base64"),
-            mimeType: referenceImage.mimeType,
-          },
+          text:
+            orderedRefs.length === 1
+              ? "USER REFERENCE PHOTO — the exact person to render. Preserve their identity perfectly:"
+              : "USER REFERENCE PHOTOS — the SAME person from multiple angles. Preserve their exact identity:",
         },
       ];
+      for (const ref of orderedRefs) {
+        parts.push({
+          inlineData: { data: ref.bytes.data.toString("base64"), mimeType: ref.bytes.mimeType },
+        });
+      }
 
       for (let i = 0; i < input.items.length; i++) {
         const item = input.items[i];
@@ -497,6 +531,22 @@ function promptContext(input: TryOnGenerationInput): Omit<TryOnPromptContext, "v
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Lower = more useful for preserving identity when it's not the matching view. */
+function referenceAnglePriority(angle: string): number {
+  switch (angle) {
+    case "face":
+      return 0;
+    case "front":
+      return 1;
+    case "back":
+      return 2;
+    case "other":
+      return 3;
+    default:
+      return 4;
+  }
+}
 
 function dedupeUrls(urls: string[]): string[] {
   const seen = new Set<string>();

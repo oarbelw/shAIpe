@@ -22,7 +22,7 @@ import { FitAnalysisCard } from "@/components/FitAnalysisCard";
 import { AddToClosetButton } from "@/components/AddToClosetButton";
 import { outfitDisplayTitle, type SerializedTryOn, type SerializedVariation } from "@/lib/serializers";
 
-const SINGLE_VIEW_LABELS = ["Front view", "Side view", "Back view"];
+const SINGLE_VIEW_LABELS = ["Front view", "Back view"];
 const OUTFIT_VIEW_LABELS = ["Front view"];
 const POLL_INTERVAL_MS = 2500;
 const SLOW_THRESHOLD_S = 180;
@@ -154,7 +154,7 @@ export function TryOnResult({ tryOn: initialTryOn }: { tryOn: SerializedTryOn })
           </Card>
         ) : (
           <>
-            <div className={`grid gap-4 ${isOutfit ? "max-w-md" : "sm:grid-cols-3"}`}>
+            <div className={`grid gap-4 ${isOutfit ? "max-w-md" : "sm:grid-cols-2"}`}>
               {Array.from({ length: totalViews }).map((_, i) => {
                 const url = tryOn.generatedImages[i];
                 return (

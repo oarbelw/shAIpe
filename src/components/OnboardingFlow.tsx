@@ -25,7 +25,7 @@ export function OnboardingFlow({
   const [images, setImages] = useState<UserImage[]>(initialImages);
   const [profileSaved, setProfileSaved] = useState(!!initialProfile);
 
-  const requiredAngles = ["front", "side", "back"];
+  const requiredAngles = ["front", "back"];
   const uploadedAngles = new Set(images.map((img) => img.angle));
   const missingAngles = requiredAngles.filter((a) => !uploadedAngles.has(a));
 
@@ -70,7 +70,7 @@ export function OnboardingFlow({
               <AlertDescription>
                 Still needed: {missingAngles.join(", ")} photo
                 {missingAngles.length > 1 ? "s" : ""}. You can continue, but previews are most
-                accurate with all three.
+                accurate with both a front and a back photo.
               </AlertDescription>
             </Alert>
           )}
