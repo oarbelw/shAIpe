@@ -1,0 +1,11 @@
+node_modules
+.next
+uploads
+prisma/dev.db
+prisma/dev.db-journal
+.git
+.env
+.env.*
+*.md
+shAIpe Product Specification.docx
+.DS_Store

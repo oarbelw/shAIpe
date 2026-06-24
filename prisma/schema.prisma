@@ -1,0 +1,111 @@
+// shAIpe database schema.
+// Using SQLite for local development (zero-setup). To move to PostgreSQL,
+// change the datasource provider/url and convert the JSON-string array
+// fields (Product.images, TryOn.generatedImages, etc.) to String[].
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile UserProfile?
+  images  UserImage[]
+  tryOns  TryOn[]
+}
+
+model UserProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  age             Int?
+  sex             String?
+  heightCm        Float?
+  weightKg        Float?
+  bodyType        String?
+  preferredFit    String?
+  braSize         String?
+  jeanSize        String?
+  pantWaist       String?
+  pantInseam      String?
+  dressSize       String?
+  shoeSize        String?
+  underwearSize   String?
+  shirtSize       String?
+  jacketSize      String?
+  bustCm          Float?
+  waistCm         Float?
+  hipsCm          Float?
+  shoulderWidthCm Float?
+  fitNotes        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model UserImage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  angle     String // "front" | "side" | "back" | "face" | "other"
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  url            String?
+  brand          String?
+  title          String
+  price          String?
+  currency       String?
+  description    String?
+  category       String?
+  images         String   @default("[]") // JSON string[]
+  availableSizes String   @default("[]") // JSON string[]
+  colors         String   @default("[]") // JSON string[]
+  material       String?
+  fitDescription String?
+  modelInfo      String?
+  reviewsSummary String?
+  rawScrapedText String?
+  createdAt      DateTime @default(now())
+
+  tryOns TryOn[]
+}
+
+model TryOn {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id])
+  selectedSize    String?
+  selectedColor   String?
+  userNotes       String?
+  status          String   @default("pending") // pending | generating | completed | failed
+  generatedImages String   @default("[]") // JSON string[]
+  fitPrediction   String?
+  recommendedSize String?
+  confidence      Float?
+  fitExplanation  String?
+  fitWarnings     String   @default("[]") // JSON string[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Variations ("remixes") are child try-ons generated from a parent's result
+  // with a modification prompt, e.g. "make the shirt red".
+  parentId        String?
+  parent          TryOn?   @relation("TryOnVariations", fields: [parentId], references: [id], onDelete: Cascade)
+  variations      TryOn[]  @relation("TryOnVariations")
+  variationPrompt String?
+}
